@@ -41,12 +41,12 @@ git clone https://github.com/TEXTaiLES/Environmental-Condition-Monitoring
 The Raspberry Pi Zero W and sensor pins are depicted in the following images.
 
 <p align="center">
-        <img src="images/system/raspberry_pins.png" alt="Raspberry Pi Pins" width="800"/>
+        <img src="images/raspberry_pins.png" alt="Raspberry Pi Pins" width="800"/>
     </a>
 </p>
 
 <p align="center">
-        <img src="images/assets/system/sensor.png" alt="Raspberry Pi Pins" width="300"/>
+        <img src="images/sensor.png" alt="Raspberry Pi Pins" width="300"/>
     </a>
 </p>
 
