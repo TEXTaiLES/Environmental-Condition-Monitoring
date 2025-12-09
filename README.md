@@ -35,7 +35,7 @@ After the installation of the OS, make sure that you have cloned the following r
 ```bash
 git clone https://github.com/TEXTaiLES/Environmental-Condition-Monitoring
 ```
-- The `code` folder contains the script that enables the measurements via the sensor.
+- The `code` folder contains the script used to perform sensor measurements, the corresponding sensor library, and a shell script that installs all Python dependencies.
 
 ### Step 2 - Wiring
 The Raspberry Pi Zero W and sensor pins are depicted in the following images.
