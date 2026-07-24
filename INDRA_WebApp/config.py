@@ -1,7 +1,7 @@
 import os
 
 API_BASE_URL = os.environ.get("SENSOR_API_BASE_URL", "ADD_URL")
-API_TOKEN = os.environ.get("SENSOR_API_TOKEN", "ADD_KEY")
+API_TOKEN = os.environ.get("SENSOR_API_TOKEN", "ADD_YOUR_KEY")
 
 DIRECTUS_URL = os.environ.get("DIRECTUS_URL", "ADD_URL")
 
