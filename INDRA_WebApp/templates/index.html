@@ -1,0 +1,279 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - INDRA{% endblock %}
+
+{% block content %}
+<div class="container py-4 dashboard-shell">
+  <div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4">
+    <div>
+      <h2 class="mb-1">INDRA Dashboard</h2>
+      <p class="text-muted mb-0">Select a sensor and time window to inspect the latest readings.</p>
+    </div>
+    {% if selected_sensor %}
+      <div class="text-end">
+        <div class="text-muted small">Active range</div>
+        <div class="fw-semibold">{{ selected_range_label }}</div>
+      </div>
+    {% endif %}
+  </div>
+
+  <div class="card shadow-sm border-0 mb-4 dashboard-controls">
+    <div class="card-body">
+      <form method="GET" class="row g-3 align-items-end">
+        <div class="col-12 col-md-6 col-xl-5">
+          <label for="sensor_id" class="form-label">Sensor</label>
+          <select class="form-select" id="sensor_id" name="sensor_id">
+            {% for sensor in sensor_options %}
+              <option value="{{ sensor.id }}" {% if sensor.id == selected_sensor_id %}selected{% endif %}>
+                {{ sensor.name }} 
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-12 col-md-4 col-xl-3">
+          <label for="range" class="form-label">Time range</label>
+          <select class="form-select" id="range" name="range">
+            {% for option in range_options %}
+              <option value="{{ option.value }}" {% if option.value == selected_range %}selected{% endif %}>
+                {{ option.label }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-12 col-md-2 col-xl-2">
+          <button type="submit" class="btn btn-primary w-100">Apply</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  {% if selected_sensor %}
+    <div class="alert alert-info d-none" id="debugInfo" style="display: none !important;">
+      <strong>Debug Info:</strong> Sensor: {{ selected_sensor.name }}, Datasets: {{ selected_sensor.datasets|length }}, Points in first: {{ selected_sensor.datasets[0].points|length if selected_sensor.datasets else 0 }}
+      <br><small>If charts are empty, visit <a href="/api/debug">/api/debug</a> to check raw data</small>
+    </div>
+
+    <div class="card mb-4 shadow-sm border-0">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <strong>{{ selected_sensor.name }}</strong>
+        <span class="badge bg-secondary">{{ selected_sensor.count }} readings</span>
+      </div>
+      <div class="card-body">
+        {% if selected_sensor.datasets %}
+          <div class="row g-3">
+            {% for dataset in selected_sensor.datasets %}
+              <div class="col-12 col-lg-4">
+                <div class="chart-card h-100">
+                  <div class="chart-card__header">
+                    <span class="chart-card__dot" style="background: {{ dataset.color }};"></span>
+                    <strong>{{ dataset.label }}</strong>
+                  </div>
+                  {% if dataset.lastValue is not none %}
+                    <div class="chart-card__value">
+                      <span class="chart-card__value-text">{{ "%.2f" % dataset.lastValue }}</span>
+                    </div>
+                  {% endif %}
+                  <div class="chart-card__canvas-wrap" style="cursor: pointer;" data-chart-key="{{ dataset.key }}" data-bs-toggle="modal" data-bs-target="#chartModal" onclick="showChartModal('{{ selected_sensor.id }}', '{{ dataset.key }}', '{{ dataset.label }}')">
+                    <canvas id="chart-{{ selected_sensor.id }}-{{ dataset.key }}"></canvas>
+                  </div>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="text-muted mb-0">No readings found for this sensor in the selected range.</p>
+        {% endif %}
+      </div>
+    </div>
+  {% else %}
+    <div class="alert alert-info">No sensor data available.</div>
+  {% endif %}
+</div>
+
+<div class="modal fade" id="chartModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="chartModalTitle"></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body" style="height: 500px;">
+        <canvas id="modalChart"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/date-fns@2.30.0/dist/date-fns.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0"></script>
+<script>
+  const selectedSensor = {{ selected_sensor | tojson }};
+  const selectedRange = "{{ selected_range }}";
+  let modalChartInstance = null;
+  const chartInstances = {};
+
+  function hexToRgba(hex, alpha) {
+    const normalized = hex.replace('#', '');
+    const value = normalized.length === 3
+      ? normalized.split('').map((part) => part + part).join('')
+      : normalized;
+    const intValue = parseInt(value, 16);
+    const red = (intValue >> 16) & 255;
+    const green = (intValue >> 8) & 255;
+    const blue = intValue & 255;
+    return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+  }
+
+  function getScalingForRange(range) {
+    const rangeConfig = {
+      '6h': { maxTicksLimit: 7, displayFormats: { minute: 'HH:mm', hour: 'HH:mm', day: 'dd MMM' } },
+      '24h': { maxTicksLimit: 6, displayFormats: { minute: 'HH:mm', hour: 'HH:mm', day: 'dd MMM' } },
+      '7d': { maxTicksLimit: 7, displayFormats: { hour: 'dd MMM', day: 'dd MMM', week: 'dd MMM' } },
+      '30d': { maxTicksLimit: 8, displayFormats: { hour: 'dd MMM', day: 'dd MMM', month: 'MMM' } },
+      'all': { maxTicksLimit: 5, displayFormats: { day: 'dd MMM', week: 'dd MMM', month: 'MMM yyyy' } },
+    };
+    return rangeConfig[range] || rangeConfig['24h'];
+  }
+
+  function createChart(canvasId, dataset, scalingConfig) {
+    const ctx = document.getElementById(canvasId);
+    if (!ctx) return null;
+
+    console.log(`Creating chart for ${canvasId}:`, dataset);
+
+    const chart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        datasets: [{
+          label: dataset.label,
+          data: dataset.points || [],
+          borderColor: dataset.color,
+          backgroundColor: hexToRgba(dataset.color, 0.12),
+          pointBackgroundColor: dataset.color,
+          pointBorderColor: dataset.color,
+          spanGaps: true,
+          tension: 0.25,
+          pointRadius: 2,
+          pointHoverRadius: 4,
+          parsing: true,
+          borderWidth: 2,
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { mode: 'index', intersect: false },
+        },
+        scales: {
+          x: {
+            type: 'time',
+            time: {
+              tooltipFormat: 'PPpp',
+              displayFormats: scalingConfig.displayFormats,
+            },
+            ticks: {
+              maxTicksLimit: scalingConfig.maxTicksLimit,
+              autoSkip: true,
+              maxRotation: 0,
+            },
+          },
+          y: {
+            beginAtZero: false,
+          },
+        }
+      }
+    });
+    
+    return chart;
+  }
+
+  function showChartModal(sensorId, datasetKey, label) {
+    const dataset = selectedSensor.datasets.find(d => d.key === datasetKey);
+    if (!dataset) return;
+
+    document.getElementById('chartModalTitle').textContent = label;
+    
+    if (modalChartInstance) {
+      modalChartInstance.destroy();
+    }
+
+    const scalingConfig = getScalingForRange(selectedRange);
+    
+    setTimeout(() => {
+      const modalCanvas = document.getElementById('modalChart');
+      if (modalCanvas) {
+        const ctx = modalCanvas.getContext('2d');
+        modalChartInstance = new Chart(ctx, {
+          type: 'line',
+          data: {
+            datasets: [{
+              label: dataset.label,
+              data: dataset.points || [],
+              borderColor: dataset.color,
+              backgroundColor: hexToRgba(dataset.color, 0.12),
+              pointBackgroundColor: dataset.color,
+              pointBorderColor: dataset.color,
+              spanGaps: true,
+              tension: 0.25,
+              pointRadius: 3,
+              pointHoverRadius: 5,
+              parsing: true,
+              borderWidth: 2.5,
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: true, position: 'top' },
+              tooltip: { mode: 'index', intersect: false },
+            },
+            scales: {
+              x: {
+                type: 'time',
+                time: {
+                  tooltipFormat: 'PPpp',
+                  displayFormats: scalingConfig.displayFormats,
+                },
+                ticks: {
+                  maxTicksLimit: 10,
+                  autoSkip: true,
+                  maxRotation: 0,
+                },
+              },
+              y: {
+                beginAtZero: false,
+              },
+            }
+          }
+        });
+      }
+    }, 100);
+  }
+
+  if (selectedSensor && Array.isArray(selectedSensor.datasets)) {
+    console.log('Selected Sensor:', selectedSensor);
+    const scalingConfig = getScalingForRange(selectedRange);
+    
+    selectedSensor.datasets.forEach(dataset => {
+      const canvasId = `chart-${selectedSensor.id}-${dataset.key}`;
+      console.log(`Processing dataset: ${dataset.key}`, dataset);
+      const chart = createChart(canvasId, dataset, scalingConfig);
+      if (chart) {
+        chartInstances[canvasId] = chart;
+      }
+    });
+  } else {
+    console.warn('No sensor data available');
+  }
+
+  // Auto-refresh every 15 minutes (900 seconds)
+  setTimeout(() => {
+    window.location.reload();
+  }, 900000);
+</script>
+{% endblock %}

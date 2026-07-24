@@ -1,0 +1,78 @@
+.site-footer img {
+    max-height: 28px;
+}
+
+.card-header {
+    font-weight: 500;
+}
+
+.dashboard-shell {
+    max-width: 1280px;
+}
+
+.dashboard-controls {
+    background: linear-gradient(180deg, rgba(13, 110, 253, 0.04), rgba(13, 110, 253, 0));
+}
+
+.chart-card {
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 1rem;
+    padding: 1rem;
+    background: #fff;
+    display: flex;
+    flex-direction: column;
+    min-height: 280px;
+}
+
+.chart-card__header {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    margin-bottom: 0.85rem;
+}
+
+.chart-card__dot {
+    width: 0.85rem;
+    height: 0.85rem;
+    border-radius: 999px;
+    flex: 0 0 auto;
+}
+
+.chart-card__value {
+    padding: 0.5rem 0;
+    margin-bottom: 0.75rem;
+    border-bottom: 2px solid rgba(0, 0, 0, 0.08);
+}
+
+.chart-card__value-text {
+    font-size: 1.65rem;
+    font-weight: 600;
+    color: #212529;
+    display: block;
+}
+
+.chart-card__canvas-wrap {
+    position: relative;
+    height: 180px;
+    width: 100%;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border-radius: 0.5rem;
+    overflow: hidden;
+}
+
+.chart-card__canvas-wrap:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+    transform: translateY(-2px);
+}
+
+.chart-card__canvas-wrap canvas {
+    display: block;
+    width: 100% !important;
+    height: 100% !important;
+}
+
+#modalChart {
+    width: 100%;
+    height: 100%;
+}
