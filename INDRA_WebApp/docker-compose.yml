@@ -1,0 +1,26 @@
+name: indra_panel
+
+services:
+  indra_panel:
+    image: indra_panel
+    container_name: indra_panel
+    command: []
+    environment:
+      DIRECTUS_URL: http://directus:port
+      SENSOR_API_BASE_URL: http://sensors_api:port
+    volumes:
+      - .:/app
+    ports:
+      - "5000:5000"
+    networks:
+      - textailes
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.indra_panel.rule=Host(`INDRA_URL`)"
+      - "traefik.http.routers.indra_panel.entrypoints=websecure"
+      - "traefik.http.routers.indra_panel.tls.certresolver=le"
+    restart: "always"
+
+networks:
+  textailes:
+    external: true
