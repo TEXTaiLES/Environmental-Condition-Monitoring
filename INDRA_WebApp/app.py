@@ -11,10 +11,12 @@ from flask_login import (
     logout_user,
 )
 
-import config
+from config_loader import load_config
+
+config = load_config()
 
 app = Flask(__name__)
-app.secret_key = config.SECRET_KEY
+app.secret_key = config['SECRET_KEY']
 
 login_manager = LoginManager()
 login_manager.init_app(app)
@@ -48,7 +50,7 @@ def login():
         password = request.form.get("password")
 
         resp = requests.post(
-            f"{config.DIRECTUS_URL}/auth/login",
+            f"{config['DIRECTUS_URL']}/auth/login",
             json={"email": username, "password": password},
             headers={"Content-Type": "application/json"},
         )
@@ -101,8 +103,8 @@ RANGE_DELTAS = {
 
 
 def fetch_sensor_readings(per_page=1000):
-    url = f"{config.API_BASE_URL}/sensor-readings"
-    headers = {"Authorization": f"Bearer {config.API_TOKEN}"}
+    url = f"{config['API_BASE_URL']}/sensor-readings"
+    headers = {"Authorization": f"Bearer {config['API_TOKEN']}"}
     params = {"per_page": per_page}
     resp = requests.get(url, headers=headers, params=params, timeout=15)
     resp.raise_for_status()
@@ -165,7 +167,7 @@ def build_sensor_options(readings):
         sensor_options.append(
             {
                 "id": sensor_id,
-                "name": config.SENSOR_NAMES.get(sensor_id, sensor_id),
+                "name": config['SENSOR_NAMES'].get(sensor_id, sensor_id),
                 "count": len(rows),
             }
         )
@@ -207,7 +209,7 @@ def build_selected_sensor(sensor_id, rows):
 
     return {
         "id": sensor_id,
-        "name": config.SENSOR_NAMES.get(sensor_id, sensor_id),
+        "name": config['SENSOR_NAMES'].get(sensor_id, sensor_id),
         "count": len(rows),
         "datasets": datasets,
     }
@@ -268,6 +270,5 @@ def debug_data():
         "sensor_options": build_sensor_options(readings),
     }
 
-
-if __name__ == "__main__":
-    app.run(debug=True,port=5000)
+if __name__ == '__main__':
+    app.run(debug=True, host='0.0.0.0', port=config['PORT'])

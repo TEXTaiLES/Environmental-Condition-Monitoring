@@ -1,0 +1,18 @@
+# Default settings. Local values belong in config_override.yml.
+PORT: # add your desired port here, e.g. 8055
+API_BASE_URL: # add your API base URL here, e.g. http://localhost:8055
+API_TOKEN: # add your API token here, e.g. 1234567890abcdef
+DIRECTUS_URL: # add your Directus URL here, e.g. http://localhost:8055
+SECRET_KEY: # add your secret key here, e.g. 1234567890abcdef
+SENSOR_NAMES:
+  TEXTaiLES-Indra-Box-0: Indra Box 0
+  TEXTaiLES-Indra-Box-1: Indra Box 1
+  TEXTaiLES-Indra-Box-2: Indra Box 2
+  TEXTaiLES-Indra-Box-3: Indra Box 3
+  TEXTaiLES-Indra-Box-4: Indra Box 4
+  TEXTaiLES-Indra-Box-5: Indra Box 5
+  TEXTaiLES-Indra-Box-6: Indra Box 6
+  TEXTaiLES-Indra-Box-7: Indra Box 7
+  TEXTaiLES-Indra-Box-8: Indra Box 8
+  TEXTaiLES-Indra-Box-9: Indra Box 9
+  TEXTaiLES-Indra-Box-10: Indra Box 10
