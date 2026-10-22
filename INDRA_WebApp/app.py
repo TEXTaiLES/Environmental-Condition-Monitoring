@@ -107,12 +107,37 @@ def api_headers():
     return {"Authorization": f"Bearer {config['API_TOKEN']}"}
 
 
-def fetch_sensor_readings(per_page=1000):
+READINGS_PAGE_SIZE = 200
+READINGS_MAX_PAGES = 50
+
+
+def fetch_sensor_readings(sensor_id=None, start_date=None, per_page=READINGS_PAGE_SIZE, max_pages=READINGS_MAX_PAGES):
+    """Page through /sensor-readings until it runs out (or max_pages is reached)."""
     url = f"{config['API_BASE_URL']}/sensor-readings"
-    params = {"per_page": per_page}
-    resp = requests.get(url, headers=api_headers(), params=params, timeout=15)
-    resp.raise_for_status()
-    return resp.json()
+    readings = []
+    for page in range(1, max_pages + 1):
+        params = {"per_page": per_page, "page": page}
+        if sensor_id:
+            params["sensor_id"] = sensor_id
+        if start_date:
+            params["start_date"] = start_date
+        resp = requests.get(url, headers=api_headers(), params=params, timeout=15)
+        resp.raise_for_status()
+        batch = resp.json()
+        if not batch:
+            break
+        readings.extend(batch)
+    return readings
+
+
+def fetch_latest_readings():
+    """Most recent reading of every sensor in SENSOR_NAMES that has reported at least once."""
+    latest = {}
+    for sensor_id in config['SENSOR_NAMES']:
+        rows = fetch_sensor_readings(sensor_id=sensor_id, per_page=1, max_pages=1)
+        if rows:
+            latest[sensor_id] = rows[0]
+    return latest
 
 
 def fetch_sensor_alerts(sensor_id=None, page=1, per_page=50):
@@ -148,21 +173,12 @@ def format_timestamp(raw_value):
     return parsed.isoformat().replace("+00:00", "Z") if parsed else None
 
 
-def filter_readings_by_range(readings, range_value):
-    if range_value == "all":
-        return readings
-
+def range_start(range_value):
+    """ISO start of the selected time window, or None for all time."""
     time_delta = RANGE_DELTAS.get(range_value)
     if not time_delta:
-        return readings
-
-    cutoff = datetime.now(timezone.utc) - time_delta
-    filtered = []
-    for reading in readings:
-        reading_timestamp = parse_timestamp(reading.get("timestamp"))
-        if reading_timestamp and reading_timestamp >= cutoff:
-            filtered.append(reading)
-    return filtered
+        return None
+    return (datetime.now(timezone.utc) - time_delta).isoformat()
 
 
 def group_by_sensor(readings):
@@ -174,15 +190,13 @@ def group_by_sensor(readings):
     return grouped
 
 
-def build_sensor_options(readings):
-    grouped = group_by_sensor(readings)
+def build_sensor_options(latest_readings):
     sensor_options = []
-    for sensor_id, rows in grouped.items():
+    for sensor_id in latest_readings:
         sensor_options.append(
             {
                 "id": sensor_id,
                 "name": config['SENSOR_NAMES'].get(sensor_id, sensor_id),
-                "count": len(rows),
             }
         )
 
@@ -199,7 +213,7 @@ def build_selected_sensor(sensor_id, rows):
         points = []
         last_value = None
         last_timestamp = None
-        
+
         for reading in rows:
             value = reading.get(metric["key"])
             reading_timestamp = format_timestamp(reading.get("timestamp"))
@@ -273,12 +287,11 @@ def check_reading(sensor_id, reading):
     return alerts
 
 
-def find_active_alerts(readings):
+def find_active_alerts(latest_readings):
     """Compare each sensor's most recent reading against its accepted ranges."""
     alerts = []
-    for sensor_id, rows in group_by_sensor(readings).items():
-        if rows:
-            alerts.extend(check_reading(sensor_id, rows[-1]))
+    for sensor_id, reading in latest_readings.items():
+        alerts.extend(check_reading(sensor_id, reading))
     alerts.sort(key=lambda alert: (alert["sensor_name"], alert["metric"]))
     return alerts
 
@@ -317,12 +330,12 @@ def record_alerts(alerts):
 @login_required
 def index():
     try:
-        readings = fetch_sensor_readings()
+        latest_readings = fetch_latest_readings()
     except requests.RequestException as e:
         flash(f"Could not reach sensor API: {e}", "error")
-        readings = []
+        latest_readings = {}
 
-    sensor_options = build_sensor_options(readings)
+    sensor_options = build_sensor_options(latest_readings)
     selected_sensor_id = request.args.get("sensor_id")
     selected_range = request.args.get("range", "all")
 
@@ -331,16 +344,24 @@ def index():
     elif selected_sensor_id and selected_sensor_id not in {sensor["id"] for sensor in sensor_options}:
         selected_sensor_id = sensor_options[0]["id"] if sensor_options else None
 
-    filtered_readings = filter_readings_by_range(readings, selected_range)
-    filtered_grouped = group_by_sensor(filtered_readings)
-    selected_sensor = build_selected_sensor(selected_sensor_id, filtered_grouped.get(selected_sensor_id, []))
+    selected_rows = []
+    if selected_sensor_id:
+        try:
+            selected_rows = fetch_sensor_readings(
+                sensor_id=selected_sensor_id, start_date=range_start(selected_range)
+            )
+        except requests.RequestException as e:
+            flash(f"Could not load readings for this sensor: {e}", "error")
+    selected_sensor = build_selected_sensor(
+        selected_sensor_id, group_by_sensor(selected_rows).get(selected_sensor_id, [])
+    )
 
     selected_range_label = next(
         (option["label"] for option in RANGE_OPTIONS if option["value"] == selected_range),
         "Custom range",
     )
 
-    active_alerts = find_active_alerts(readings)
+    active_alerts = find_active_alerts(latest_readings)
     record_alerts(active_alerts)
     selected_alert_metrics = {
         alert["metric"] for alert in active_alerts if alert["sensor_id"] == selected_sensor_id
@@ -401,17 +422,18 @@ def alerts():
 @login_required
 def debug_data():
     try:
-        readings = fetch_sensor_readings(per_page=10)
+        readings = fetch_sensor_readings(per_page=10, max_pages=1)
+        latest_readings = fetch_latest_readings()
     except requests.RequestException as e:
         return {"error": str(e)}, 500
 
     sample_reading = readings[0] if readings else None
-    
+
     return {
         "total_readings": len(readings),
         "sample_reading": sample_reading,
         "parsed_timestamp": format_timestamp(sample_reading.get("timestamp")) if sample_reading else None,
-        "sensor_options": build_sensor_options(readings),
+        "sensor_options": build_sensor_options(latest_readings),
     }
 
 if __name__ == '__main__':
