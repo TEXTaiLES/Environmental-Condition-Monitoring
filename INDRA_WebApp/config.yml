@@ -16,3 +16,52 @@ SENSOR_NAMES:
   TEXTaiLES-Indra-Box-8: Indra Box 8
   TEXTaiLES-Indra-Box-9: Indra Box 9
   TEXTaiLES-Indra-Box-10: Indra Box 10
+
+# Accepted range per sensor and metric. A reading outside it raises an alert
+# on the dashboard and is saved to HESTIA. Leave out min or max for a one-sided
+# limit, or a metric entirely to skip it. Sensors not listed are not checked.
+SENSOR_THRESHOLDS:
+  TEXTaiLES-Indra-Box-0:
+    temperature: {min: 16, max: 25}
+    humidity: {min: 40, max: 60}
+    luminosity: {max: 200}
+  TEXTaiLES-Indra-Box-1:
+    temperature: {min: 16, max: 25}
+    humidity: {min: 40, max: 60}
+    luminosity: {max: 200}
+  TEXTaiLES-Indra-Box-2:
+    temperature: {min: 16, max: 25}
+    humidity: {min: 40, max: 60}
+    luminosity: {max: 200}
+  TEXTaiLES-Indra-Box-3:
+    temperature: {min: 16, max: 25}
+    humidity: {min: 40, max: 60}
+    luminosity: {max: 200}
+  TEXTaiLES-Indra-Box-4:
+    temperature: {min: 16, max: 25}
+    humidity: {min: 40, max: 60}
+    luminosity: {max: 200}
+  TEXTaiLES-Indra-Box-5:
+    temperature: {min: 16, max: 25}
+    humidity: {min: 40, max: 60}
+    luminosity: {max: 200}
+  TEXTaiLES-Indra-Box-6:
+    temperature: {min: 16, max: 25}
+    humidity: {min: 40, max: 60}
+    luminosity: {max: 200}
+  TEXTaiLES-Indra-Box-7:
+    temperature: {min: 16, max: 25}
+    humidity: {min: 40, max: 60}
+    luminosity: {max: 200}
+  TEXTaiLES-Indra-Box-8:
+    temperature: {min: 16, max: 25}
+    humidity: {min: 40, max: 60}
+    luminosity: {max: 200}
+  TEXTaiLES-Indra-Box-9:
+    temperature: {min: 16, max: 25}
+    humidity: {min: 40, max: 60}
+    luminosity: {max: 200}
+  TEXTaiLES-Indra-Box-10:
+    temperature: {min: 16, max: 25}
+    humidity: {min: 40, max: 60}
+    luminosity: {max: 200}

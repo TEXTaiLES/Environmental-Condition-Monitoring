@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Alert history - INDRA{% endblock %}
+
+{% block content %}
+<div class="container py-4 dashboard-shell">
+  <div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4">
+    <div>
+      <h2 class="mb-1">Alert history</h2>
+      <p class="text-muted mb-0">Readings that fell outside their accepted values, newest first.</p>
+    </div>
+  </div>
+
+  <div class="card shadow-sm border-0 mb-4 dashboard-controls">
+    <div class="card-body">
+      <form method="GET" class="row g-3 align-items-end">
+        <div class="col-12 col-md-6 col-xl-5">
+          <label for="sensor_id" class="form-label">Sensor</label>
+          <select class="form-select" id="sensor_id" name="sensor_id">
+            <option value="" {% if not selected_sensor_id %}selected{% endif %}>All sensors</option>
+            {% for sensor in sensor_options %}
+              <option value="{{ sensor.id }}" {% if sensor.id == selected_sensor_id %}selected{% endif %}>
+                {{ sensor.name }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-12 col-md-2 col-xl-2">
+          <button type="submit" class="btn btn-primary w-100">Apply</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="card shadow-sm border-0">
+    <div class="card-body p-0">
+      {% if alerts %}
+        <div class="table-responsive">
+          <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
+              <tr>
+                <th scope="col">Reading time</th>
+                <th scope="col">Sensor</th>
+                <th scope="col">Metric</th>
+                <th scope="col" class="text-end">Value</th>
+                <th scope="col" class="text-end">Accepted range</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for alert in alerts %}
+                <tr>
+                  <td class="text-nowrap"><span class="js-local-time" data-timestamp="{{ alert.display_timestamp }}">{{ alert.display_timestamp }}</span></td>
+                  <td>{{ alert.sensor_name }}</td>
+                  <td>{{ alert.metric_name }}</td>
+                  <td class="text-end text-danger fw-semibold">{{ "%.2f" % alert.value }} {{ alert.unit }}</td>
+                  <td class="text-end text-muted text-nowrap">
+                    {{ alert.min_value if alert.min_value is not none else '–' }}
+                    to
+                    {{ alert.max_value if alert.max_value is not none else '–' }}
+                    {{ alert.unit }}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="text-muted p-4 mb-0">No alerts recorded{% if page > 1 %} on this page{% endif %}.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if page > 1 or has_next %}
+    <nav class="mt-3 d-flex justify-content-between">
+      {% if page > 1 %}
+        <a class="btn btn-outline-secondary" href="{{ url_for('alerts', sensor_id=selected_sensor_id, page=page - 1) }}">Newer</a>
+      {% else %}
+        <span></span>
+      {% endif %}
+      {% if has_next %}
+        <a class="btn btn-outline-secondary" href="{{ url_for('alerts', sensor_id=selected_sensor_id, page=page + 1) }}">Older</a>
+      {% endif %}
+    </nav>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.querySelectorAll('.js-local-time').forEach((element) => {
+    const parsed = new Date(element.dataset.timestamp);
+    if (!Number.isNaN(parsed.getTime())) {
+      element.textContent = parsed.toLocaleString();
+    }
+  });
+</script>
+{% endblock %}

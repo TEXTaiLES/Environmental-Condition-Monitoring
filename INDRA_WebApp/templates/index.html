@@ -16,6 +16,28 @@
     {% endif %}
   </div>
 
+  {% if active_alerts %}
+    <div class="alert alert-danger shadow-sm mb-4" role="alert" id="activeAlerts">
+      <div class="d-flex justify-content-between align-items-start gap-3">
+        <h5 class="alert-heading mb-2">
+          <i class="bi bi-exclamation-triangle-fill me-2"></i>
+          {{ active_alerts|length }} reading{{ 's' if active_alerts|length != 1 }} outside accepted values
+        </h5>
+        <a href="{{ url_for('alerts') }}" class="alert-link small text-nowrap">Alert history</a>
+      </div>
+      <ul class="mb-0 ps-3">
+        {% for alert in active_alerts %}
+          <li>
+            <a href="{{ url_for('index', sensor_id=alert.sensor_id, range=selected_range) }}" class="alert-link">{{ alert.sensor_name }}</a>:
+            {{ alert.metric_name }} is {{ "%.2f" % alert.value }} {{ alert.unit }},
+            {{ alert.direction }} the accepted {{ 'minimum' if alert.direction == 'below' else 'maximum' }} of {{ alert.limit }} {{ alert.unit }}
+            <span class="text-body-secondary small">(reading at <span class="js-local-time" data-timestamp="{{ alert.display_timestamp }}">{{ alert.display_timestamp }}</span>)</span>
+          </li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+
   <div class="card shadow-sm border-0 mb-4 dashboard-controls">
     <div class="card-body">
       <form method="GET" class="row g-3 align-items-end">
@@ -62,7 +84,7 @@
           <div class="row g-3">
             {% for dataset in selected_sensor.datasets %}
               <div class="col-12 col-lg-4">
-                <div class="chart-card h-100">
+                <div class="chart-card h-100{% if dataset.key in selected_alert_metrics %} chart-card--alert{% endif %}">
                   <div class="chart-card__header">
                     <span class="chart-card__dot" style="background: {{ dataset.color }};"></span>
                     <strong>{{ dataset.label }}</strong>
@@ -70,6 +92,9 @@
                   {% if dataset.lastValue is not none %}
                     <div class="chart-card__value">
                       <span class="chart-card__value-text">{{ "%.2f" % dataset.lastValue }}</span>
+                      {% if dataset.key in selected_alert_metrics %}
+                        <span class="badge text-bg-danger"><i class="bi bi-exclamation-triangle-fill me-1"></i>Outside accepted range</span>
+                      {% endif %}
                     </div>
                   {% endif %}
                   <div class="chart-card__canvas-wrap" style="cursor: pointer;" data-chart-key="{{ dataset.key }}" data-bs-toggle="modal" data-bs-target="#chartModal" onclick="showChartModal('{{ selected_sensor.id }}', '{{ dataset.key }}', '{{ dataset.label }}')">
@@ -270,6 +295,13 @@
   } else {
     console.warn('No sensor data available');
   }
+
+  document.querySelectorAll('.js-local-time').forEach((element) => {
+    const parsed = new Date(element.dataset.timestamp);
+    if (!Number.isNaN(parsed.getTime())) {
+      element.textContent = parsed.toLocaleString();
+    }
+  });
 
   // Auto-refresh every 15 minutes (900 seconds)
   setTimeout(() => {

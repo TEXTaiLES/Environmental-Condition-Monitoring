@@ -81,10 +81,11 @@ def logout():
 
 
 METRICS = [
-    {"key": "temperature", "label": "Temperature (°C)", "color": "#0d6efd"},
-    {"key": "humidity", "label": "Humidity (%)", "color": "#dc3545"},
-    {"key": "luminosity", "label": "Luminosity (lux)", "color": "#198754"},
+    {"key": "temperature", "label": "Temperature (°C)", "name": "Temperature", "unit": "°C", "color": "#0d6efd"},
+    {"key": "humidity", "label": "Humidity (%)", "name": "Humidity", "unit": "%", "color": "#dc3545"},
+    {"key": "luminosity", "label": "Luminosity (lux)", "name": "Luminosity", "unit": "lux", "color": "#198754"},
 ]
+METRICS_BY_KEY = {metric["key"]: metric for metric in METRICS}
 
 RANGE_OPTIONS = [
     {"value": "6h", "label": "Last 6 hours"},
@@ -102,11 +103,24 @@ RANGE_DELTAS = {
 }
 
 
+def api_headers():
+    return {"Authorization": f"Bearer {config['API_TOKEN']}"}
+
+
 def fetch_sensor_readings(per_page=1000):
     url = f"{config['API_BASE_URL']}/sensor-readings"
-    headers = {"Authorization": f"Bearer {config['API_TOKEN']}"}
     params = {"per_page": per_page}
-    resp = requests.get(url, headers=headers, params=params, timeout=15)
+    resp = requests.get(url, headers=api_headers(), params=params, timeout=15)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def fetch_sensor_alerts(sensor_id=None, page=1, per_page=50):
+    url = f"{config['API_BASE_URL']}/sensor-alerts"
+    params = {"page": page, "per_page": per_page}
+    if sensor_id:
+        params["sensor_id"] = sensor_id
+    resp = requests.get(url, headers=api_headers(), params=params, timeout=15)
     resp.raise_for_status()
     return resp.json()
 
@@ -215,6 +229,90 @@ def build_selected_sensor(sensor_id, rows):
     }
 
 
+def thresholds_for(sensor_id):
+    """Accepted range per metric for one sensor, from SENSOR_THRESHOLDS."""
+    return (config.get("SENSOR_THRESHOLDS") or {}).get(sensor_id) or {}
+
+
+def check_reading(sensor_id, reading):
+    """Return one alert per metric of `reading` that falls outside its accepted range."""
+    alerts = []
+    for key, bounds in thresholds_for(sensor_id).items():
+        bounds = bounds or {}
+        metric = METRICS_BY_KEY.get(key, {"key": key, "name": key.replace("_", " ").capitalize(), "unit": ""})
+        try:
+            value = float(reading.get(key))
+        except (TypeError, ValueError):
+            continue
+
+        min_value = bounds.get("min")
+        max_value = bounds.get("max")
+        if min_value is not None and value < min_value:
+            direction, limit = "below", min_value
+        elif max_value is not None and value > max_value:
+            direction, limit = "above", max_value
+        else:
+            continue
+
+        alerts.append(
+            {
+                "sensor_id": sensor_id,
+                "sensor_name": config['SENSOR_NAMES'].get(sensor_id, sensor_id),
+                "metric": key,
+                "metric_name": metric["name"],
+                "unit": metric["unit"],
+                "value": value,
+                "min_value": min_value,
+                "max_value": max_value,
+                "direction": direction,
+                "limit": limit,
+                "timestamp": reading.get("timestamp"),
+                "display_timestamp": format_timestamp(reading.get("timestamp")),
+            }
+        )
+    return alerts
+
+
+def find_active_alerts(readings):
+    """Compare each sensor's most recent reading against its accepted ranges."""
+    alerts = []
+    for sensor_id, rows in group_by_sensor(readings).items():
+        if rows:
+            alerts.extend(check_reading(sensor_id, rows[-1]))
+    alerts.sort(key=lambda alert: (alert["sensor_name"], alert["metric"]))
+    return alerts
+
+
+# Alerts already saved to HESTIA by this process, so a page refresh doesn't re-post them.
+# HESTIA ignores duplicates anyway; this only saves the round trip.
+_recorded_alerts = set()
+
+
+def record_alerts(alerts):
+    for alert in alerts:
+        alert_key = (alert["sensor_id"], alert["timestamp"], alert["metric"])
+        if alert_key in _recorded_alerts:
+            continue
+        try:
+            resp = requests.post(
+                f"{config['API_BASE_URL']}/sensor-alerts",
+                headers=api_headers(),
+                json={
+                    "sensor_id": alert["sensor_id"],
+                    "timestamp": alert["timestamp"],
+                    "metric": alert["metric"],
+                    "value": alert["value"],
+                    "min_value": alert["min_value"],
+                    "max_value": alert["max_value"],
+                },
+                timeout=10,
+            )
+            resp.raise_for_status()
+            _recorded_alerts.add(alert_key)
+        except requests.RequestException as e:
+            app.logger.warning(f"Could not save alert {alert_key} to HESTIA: {e}")
+
+
 @app.route("/")
 @login_required
 def index():
@@ -242,6 +340,12 @@ def index():
         "Custom range",
     )
 
+    active_alerts = find_active_alerts(readings)
+    record_alerts(active_alerts)
+    selected_alert_metrics = {
+        alert["metric"] for alert in active_alerts if alert["sensor_id"] == selected_sensor_id
+    }
+
     return render_template(
         "index.html",
         sensor_options=sensor_options,
@@ -250,6 +354,46 @@ def index():
         selected_range=selected_range,
         selected_range_label=selected_range_label,
         range_options=RANGE_OPTIONS,
+        active_alerts=active_alerts,
+        selected_alert_metrics=selected_alert_metrics,
+    )
+
+
+@app.route("/alerts")
+@login_required
+def alerts():
+    selected_sensor_id = request.args.get("sensor_id") or None
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except ValueError:
+        page = 1
+    per_page = 50
+
+    try:
+        alert_rows = fetch_sensor_alerts(sensor_id=selected_sensor_id, page=page, per_page=per_page)
+    except requests.RequestException as e:
+        flash(f"Could not load alert history: {e}", "error")
+        alert_rows = []
+
+    for row in alert_rows:
+        metric = METRICS_BY_KEY.get(row.get("metric"), {})
+        row["sensor_name"] = config['SENSOR_NAMES'].get(row.get("sensor_id"), row.get("sensor_id"))
+        row["metric_name"] = metric.get("name", row.get("metric"))
+        row["unit"] = metric.get("unit", "")
+        row["display_timestamp"] = format_timestamp(row.get("reading_timestamp"))
+
+    sensor_options = [
+        {"id": sensor_id, "name": name}
+        for sensor_id, name in sorted(config['SENSOR_NAMES'].items(), key=lambda item: item[1])
+    ]
+
+    return render_template(
+        "alerts.html",
+        alerts=alert_rows,
+        sensor_options=sensor_options,
+        selected_sensor_id=selected_sensor_id,
+        page=page,
+        has_next=len(alert_rows) == per_page,
     )
 
 
