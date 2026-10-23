@@ -140,11 +140,13 @@ def fetch_latest_readings():
     return latest
 
 
-def fetch_sensor_alerts(sensor_id=None, page=1, per_page=50):
+def fetch_sensor_alerts(sensor_id=None, start_date=None, page=1, per_page=50):
     url = f"{config['API_BASE_URL']}/sensor-alerts"
     params = {"page": page, "per_page": per_page}
     if sensor_id:
         params["sensor_id"] = sensor_id
+    if start_date:
+        params["start_date"] = start_date
     resp = requests.get(url, headers=api_headers(), params=params, timeout=15)
     resp.raise_for_status()
     return resp.json()
@@ -326,6 +328,52 @@ def record_alerts(alerts):
             app.logger.warning(f"Could not save alert {alert_key} to HESTIA: {e}")
 
 
+def build_recent_alerts(fallback_alerts):
+    """Alerts from the last ALERT_WINDOW_HOURS, one entry per sensor and metric, newest first.
+
+    Read back from HESTIA so breaches recorded on earlier page loads show too. If HESTIA can't
+    be reached, falls back to the current breaches that fall inside the window.
+    """
+    window_start = datetime.now(timezone.utc) - timedelta(hours=config.get("ALERT_WINDOW_HOURS") or 24)
+    try:
+        rows = fetch_sensor_alerts(start_date=window_start.isoformat(), per_page=200)
+    except requests.RequestException as e:
+        app.logger.warning(f"Could not load recent alerts from HESTIA: {e}")
+        rows = [
+            {**alert, "reading_timestamp": alert["timestamp"]}
+            for alert in fallback_alerts
+            if (parse_timestamp(alert["timestamp"]) or window_start) > window_start
+        ]
+
+    rows.sort(
+        key=lambda row: parse_timestamp(row.get("reading_timestamp")) or window_start,
+        reverse=True,
+    )
+    recent = {}
+    for row in rows:
+        group = (row.get("sensor_id"), row.get("metric"))
+        if group in recent:
+            recent[group]["count"] += 1
+            continue
+
+        metric = METRICS_BY_KEY.get(row.get("metric"), {})
+        value, min_value, max_value = row.get("value"), row.get("min_value"), row.get("max_value")
+        below = min_value is not None and value is not None and value < min_value
+        recent[group] = {
+            "key": f"{row.get('sensor_id')}|{row.get('metric')}|{row.get('reading_timestamp')}",
+            "sensor_id": row.get("sensor_id"),
+            "sensor_name": config['SENSOR_NAMES'].get(row.get("sensor_id"), row.get("sensor_id")),
+            "metric_name": metric.get("name", row.get("metric")),
+            "unit": metric.get("unit", ""),
+            "value": value,
+            "direction": "below" if below else "above",
+            "limit": min_value if below else max_value,
+            "display_timestamp": format_timestamp(row.get("reading_timestamp")),
+            "count": 1,
+        }
+    return list(recent.values())
+
+
 @app.route("/")
 @login_required
 def index():
@@ -375,7 +423,8 @@ def index():
         selected_range=selected_range,
         selected_range_label=selected_range_label,
         range_options=RANGE_OPTIONS,
-        active_alerts=active_alerts,
+        recent_alerts=build_recent_alerts(active_alerts),
+        alert_window_hours=config.get("ALERT_WINDOW_HOURS") or 24,
         selected_alert_metrics=selected_alert_metrics,
     )
 

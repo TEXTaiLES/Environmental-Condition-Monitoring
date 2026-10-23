@@ -17,6 +17,9 @@ SENSOR_NAMES:
   TEXTaiLES-Indra-Box-9: Indra Box 9
   TEXTaiLES-Indra-Box-10: Indra Box 10
 
+# The dashboard notice lists alerts from this many hours back; older ones stay in Alert history.
+ALERT_WINDOW_HOURS: 24
+
 # Accepted range per sensor and metric. A reading outside it raises an alert
 # on the dashboard and is saved to HESTIA. Leave out min or max for a one-sided
 # limit, or a metric entirely to skip it. Sensors not listed are not checked.

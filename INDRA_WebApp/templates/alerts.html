@@ -53,9 +53,9 @@
                   <td>{{ alert.metric_name }}</td>
                   <td class="text-end text-danger fw-semibold">{{ "%.2f" % alert.value }} {{ alert.unit }}</td>
                   <td class="text-end text-muted text-nowrap">
-                    {{ alert.min_value if alert.min_value is not none else '–' }}
+                    {{ '%g' % alert.min_value if alert.min_value is not none else '–' }}
                     to
-                    {{ alert.max_value if alert.max_value is not none else '–' }}
+                    {{ '%g' % alert.max_value if alert.max_value is not none else '–' }}
                     {{ alert.unit }}
                   </td>
                 </tr>
@@ -89,7 +89,7 @@
   document.querySelectorAll('.js-local-time').forEach((element) => {
     const parsed = new Date(element.dataset.timestamp);
     if (!Number.isNaN(parsed.getTime())) {
-      element.textContent = parsed.toLocaleString();
+      element.textContent = parsed.toLocaleString('en-GB');
     }
   });
 </script>

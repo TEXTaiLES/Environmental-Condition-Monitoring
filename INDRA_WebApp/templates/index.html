@@ -16,22 +16,29 @@
     {% endif %}
   </div>
 
-  {% if active_alerts %}
+  {% if recent_alerts %}
     <div class="alert alert-danger shadow-sm mb-4" role="alert" id="activeAlerts">
       <div class="d-flex justify-content-between align-items-start gap-3">
         <h5 class="alert-heading mb-2">
           <i class="bi bi-exclamation-triangle-fill me-2"></i>
-          {{ active_alerts|length }} reading{{ 's' if active_alerts|length != 1 }} outside accepted values
+          <span id="activeAlertsCount">{{ recent_alerts|length }}</span> alert<span id="activeAlertsPlural">{{ 's' if recent_alerts|length != 1 }}</span> in the last {{ alert_window_hours }} hours
         </h5>
-        <a href="{{ url_for('alerts') }}" class="alert-link small text-nowrap">Alert history</a>
+        <div class="d-flex gap-3 small text-nowrap">
+          <a href="{{ url_for('alerts') }}" class="alert-link">Alert history</a>
+          <button type="button" class="btn btn-link alert-link p-0 small" id="dismissAllAlerts">Dismiss all</button>
+        </div>
       </div>
-      <ul class="mb-0 ps-3">
-        {% for alert in active_alerts %}
-          <li>
-            <a href="{{ url_for('index', sensor_id=alert.sensor_id, range=selected_range) }}" class="alert-link">{{ alert.sensor_name }}</a>:
-            {{ alert.metric_name }} is {{ "%.2f" % alert.value }} {{ alert.unit }},
-            {{ alert.direction }} the accepted {{ 'minimum' if alert.direction == 'below' else 'maximum' }} of {{ alert.limit }} {{ alert.unit }}
-            <span class="text-body-secondary small">(reading at <span class="js-local-time" data-timestamp="{{ alert.display_timestamp }}">{{ alert.display_timestamp }}</span>)</span>
+      <ul class="list-unstyled mb-0">
+        {% for alert in recent_alerts %}
+          <li class="d-flex justify-content-between align-items-start gap-2 py-1 js-alert-item" data-alert-key="{{ alert.key }}">
+            <span>
+              <span class="text-body-secondary small me-1"><span class="js-local-time" data-timestamp="{{ alert.display_timestamp }}">{{ alert.display_timestamp }}</span></span>
+              <a href="{{ url_for('index', sensor_id=alert.sensor_id, range=selected_range) }}" class="alert-link">{{ alert.sensor_name }}</a>:
+              {{ alert.metric_name }} {{ "%.2f" % alert.value }} {{ alert.unit }},
+              {{ alert.direction }} the accepted {{ 'minimum' if alert.direction == 'below' else 'maximum' }} of {{ '%g' % alert.limit }} {{ alert.unit }}
+              {% if alert.count > 1 %}<span class="badge text-bg-danger ms-1">{{ alert.count }} times</span>{% endif %}
+            </span>
+            <button type="button" class="btn-close btn-sm js-dismiss-alert" aria-label="Dismiss"></button>
           </li>
         {% endfor %}
       </ul>
@@ -299,9 +306,59 @@
   document.querySelectorAll('.js-local-time').forEach((element) => {
     const parsed = new Date(element.dataset.timestamp);
     if (!Number.isNaN(parsed.getTime())) {
-      element.textContent = parsed.toLocaleString();
+      element.textContent = parsed.toLocaleString('en-GB');
     }
   });
+
+  // Dismissed alerts are remembered in this browser only; Alert history keeps every alert.
+  (function setUpAlertDismissal() {
+    const box = document.getElementById('activeAlerts');
+    if (!box) return;
+    const storageKey = 'indra.dismissedAlerts';
+    const items = Array.from(box.querySelectorAll('.js-alert-item'));
+
+    let dismissed = [];
+    try {
+      dismissed = JSON.parse(localStorage.getItem(storageKey) || '[]');
+    } catch (e) {
+      dismissed = [];
+    }
+    // Keep only keys still on screen, so the list doesn't grow forever.
+    const shownKeys = new Set(items.map((item) => item.dataset.alertKey));
+    dismissed = dismissed.filter((key) => shownKeys.has(key));
+
+    function save() {
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(dismissed));
+      } catch (e) {
+        // Storage unavailable (private window): dismissal lasts until the next reload.
+      }
+    }
+
+    function refresh() {
+      const visible = items.filter((item) => !dismissed.includes(item.dataset.alertKey));
+      items.forEach((item) => item.classList.toggle('d-none', !visible.includes(item)));
+      document.getElementById('activeAlertsCount').textContent = visible.length;
+      document.getElementById('activeAlertsPlural').textContent = visible.length === 1 ? '' : 's';
+      box.classList.toggle('d-none', visible.length === 0);
+    }
+
+    items.forEach((item) => {
+      item.querySelector('.js-dismiss-alert').addEventListener('click', () => {
+        dismissed.push(item.dataset.alertKey);
+        save();
+        refresh();
+      });
+    });
+    document.getElementById('dismissAllAlerts').addEventListener('click', () => {
+      dismissed = items.map((item) => item.dataset.alertKey);
+      save();
+      refresh();
+    });
+
+    save();
+    refresh();
+  })();
 
   // Auto-refresh every 15 minutes (900 seconds)
   setTimeout(() => {
