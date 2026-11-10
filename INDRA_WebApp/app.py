@@ -140,16 +140,30 @@ def fetch_latest_readings():
     return latest
 
 
-def fetch_sensor_alerts(sensor_id=None, start_date=None, page=1, per_page=50):
+def fetch_sensor_alerts(sensor_id=None, page=1, per_page=50):
     url = f"{config['API_BASE_URL']}/sensor-alerts"
     params = {"page": page, "per_page": per_page}
     if sensor_id:
         params["sensor_id"] = sensor_id
-    if start_date:
-        params["start_date"] = start_date
     resp = requests.get(url, headers=api_headers(), params=params, timeout=15)
     resp.raise_for_status()
     return resp.json()
+
+
+def fetch_alert_summary(start_date):
+    """Newest alert per sensor and metric since start_date, with how many there were."""
+    url = f"{config['API_BASE_URL']}/sensor-alerts/summary"
+    resp = requests.get(url, headers=api_headers(), params={"start_date": start_date}, timeout=15)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def fetch_sensor_ranges(sensor_id):
+    """Accepted ranges of one sensor, kept in HESTIA, as {metric: {"min": ..., "max": ...}}."""
+    url = f"{config['API_BASE_URL']}/sensor-ranges"
+    resp = requests.get(url, headers=api_headers(), params={"sensor_id": sensor_id}, timeout=15)
+    resp.raise_for_status()
+    return {row["metric"]: {"min": row["min_value"], "max": row["max_value"]} for row in resp.json()}
 
 
 def parse_timestamp(raw_value):
@@ -245,121 +259,41 @@ def build_selected_sensor(sensor_id, rows):
     }
 
 
-def thresholds_for(sensor_id):
-    """Accepted range per metric for one sensor, from SENSOR_THRESHOLDS."""
-    return (config.get("SENSOR_THRESHOLDS") or {}).get(sensor_id) or {}
+def out_of_range_metrics(reading, ranges):
+    """Metrics of `reading` outside their accepted range, for highlighting the chart cards.
 
-
-def check_reading(sensor_id, reading):
-    """Return one alert per metric of `reading` that falls outside its accepted range."""
-    alerts = []
-    for key, bounds in thresholds_for(sensor_id).items():
-        bounds = bounds or {}
-        metric = METRICS_BY_KEY.get(key, {"key": key, "name": key.replace("_", " ").capitalize(), "unit": ""})
+    Display only: HESTIA checks every incoming reading and records the alerts itself.
+    """
+    metrics = set()
+    for key, bounds in ranges.items():
         try:
             value = float(reading.get(key))
         except (TypeError, ValueError):
             continue
-
-        min_value = bounds.get("min")
-        max_value = bounds.get("max")
-        if min_value is not None and value < min_value:
-            direction, limit = "below", min_value
-        elif max_value is not None and value > max_value:
-            direction, limit = "above", max_value
-        else:
-            continue
-
-        alerts.append(
-            {
-                "sensor_id": sensor_id,
-                "sensor_name": config['SENSOR_NAMES'].get(sensor_id, sensor_id),
-                "metric": key,
-                "metric_name": metric["name"],
-                "unit": metric["unit"],
-                "value": value,
-                "min_value": min_value,
-                "max_value": max_value,
-                "direction": direction,
-                "limit": limit,
-                "timestamp": reading.get("timestamp"),
-                "display_timestamp": format_timestamp(reading.get("timestamp")),
-            }
-        )
-    return alerts
+        if (bounds["min"] is not None and value < bounds["min"]) or \
+           (bounds["max"] is not None and value > bounds["max"]):
+            metrics.add(key)
+    return metrics
 
 
-def find_active_alerts(latest_readings):
-    """Compare each sensor's most recent reading against its accepted ranges."""
-    alerts = []
-    for sensor_id, reading in latest_readings.items():
-        alerts.extend(check_reading(sensor_id, reading))
-    alerts.sort(key=lambda alert: (alert["sensor_name"], alert["metric"]))
-    return alerts
-
-
-# Alerts already saved to HESTIA by this process, so a page refresh doesn't re-post them.
-# HESTIA ignores duplicates anyway; this only saves the round trip.
-_recorded_alerts = set()
-
-
-def record_alerts(alerts):
-    for alert in alerts:
-        alert_key = (alert["sensor_id"], alert["timestamp"], alert["metric"])
-        if alert_key in _recorded_alerts:
-            continue
-        try:
-            resp = requests.post(
-                f"{config['API_BASE_URL']}/sensor-alerts",
-                headers=api_headers(),
-                json={
-                    "sensor_id": alert["sensor_id"],
-                    "timestamp": alert["timestamp"],
-                    "metric": alert["metric"],
-                    "value": alert["value"],
-                    "min_value": alert["min_value"],
-                    "max_value": alert["max_value"],
-                },
-                timeout=10,
-            )
-            resp.raise_for_status()
-            _recorded_alerts.add(alert_key)
-        except requests.RequestException as e:
-            app.logger.warning(f"Could not save alert {alert_key} to HESTIA: {e}")
-
-
-def build_recent_alerts(fallback_alerts):
+def build_recent_alerts():
     """Alerts from the last ALERT_WINDOW_HOURS, one entry per sensor and metric, newest first.
 
-    Read back from HESTIA so breaches recorded on earlier page loads show too. If HESTIA can't
-    be reached, falls back to the current breaches that fall inside the window.
+    Returns None if HESTIA can't be reached, so the page can say alerts are unavailable.
     """
     window_start = datetime.now(timezone.utc) - timedelta(hours=config.get("ALERT_WINDOW_HOURS") or 24)
     try:
-        rows = fetch_sensor_alerts(start_date=window_start.isoformat(), per_page=200)
+        rows = fetch_alert_summary(window_start.isoformat())
     except requests.RequestException as e:
         app.logger.warning(f"Could not load recent alerts from HESTIA: {e}")
-        rows = [
-            {**alert, "reading_timestamp": alert["timestamp"]}
-            for alert in fallback_alerts
-            if (parse_timestamp(alert["timestamp"]) or window_start) > window_start
-        ]
+        return None
 
-    rows.sort(
-        key=lambda row: parse_timestamp(row.get("reading_timestamp")) or window_start,
-        reverse=True,
-    )
-    recent = {}
+    recent = []
     for row in rows:
-        group = (row.get("sensor_id"), row.get("metric"))
-        if group in recent:
-            recent[group]["count"] += 1
-            continue
-
         metric = METRICS_BY_KEY.get(row.get("metric"), {})
         value, min_value, max_value = row.get("value"), row.get("min_value"), row.get("max_value")
         below = min_value is not None and value is not None and value < min_value
-        recent[group] = {
+        recent.append({
             "key": f"{row.get('sensor_id')}|{row.get('metric')}|{row.get('reading_timestamp')}",
             "sensor_id": row.get("sensor_id"),
             "sensor_name": config['SENSOR_NAMES'].get(row.get("sensor_id"), row.get("sensor_id")),
@@ -369,9 +303,9 @@ def build_recent_alerts(fallback_alerts):
             "direction": "below" if below else "above",
             "limit": min_value if below else max_value,
             "display_timestamp": format_timestamp(row.get("reading_timestamp")),
-            "count": 1,
-        }
-    return list(recent.values())
+            "count": row.get("count") or 1,
+        })
+    return recent
 
 
 @app.route("/")
@@ -409,11 +343,15 @@ def index():
         "Custom range",
     )
 
-    active_alerts = find_active_alerts(latest_readings)
-    record_alerts(active_alerts)
-    selected_alert_metrics = {
-        alert["metric"] for alert in active_alerts if alert["sensor_id"] == selected_sensor_id
-    }
+    selected_ranges = {}
+    if selected_sensor_id:
+        try:
+            selected_ranges = fetch_sensor_ranges(selected_sensor_id)
+        except requests.RequestException as e:
+            app.logger.warning(f"Could not load accepted ranges from HESTIA: {e}")
+    selected_alert_metrics = out_of_range_metrics(
+        latest_readings.get(selected_sensor_id) or {}, selected_ranges
+    )
 
     return render_template(
         "index.html",
@@ -423,8 +361,9 @@ def index():
         selected_range=selected_range,
         selected_range_label=selected_range_label,
         range_options=RANGE_OPTIONS,
-        recent_alerts=build_recent_alerts(active_alerts),
+        recent_alerts=build_recent_alerts(),
         alert_window_hours=config.get("ALERT_WINDOW_HOURS") or 24,
+        selected_ranges=selected_ranges,
         selected_alert_metrics=selected_alert_metrics,
     )
 

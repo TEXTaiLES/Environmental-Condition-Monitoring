@@ -16,7 +16,11 @@
     {% endif %}
   </div>
 
-  {% if recent_alerts %}
+  {% if recent_alerts is none %}
+    <div class="alert alert-warning shadow-sm mb-4" role="alert">
+      <i class="bi bi-exclamation-circle me-2"></i>Alerts are temporarily unavailable because HESTIA could not be reached.
+    </div>
+  {% elif recent_alerts %}
     <div class="alert alert-danger shadow-sm mb-4" role="alert" id="activeAlerts">
       <div class="d-flex justify-content-between align-items-start gap-3">
         <h5 class="alert-heading mb-2">
@@ -102,6 +106,15 @@
                       {% if dataset.key in selected_alert_metrics %}
                         <span class="badge text-bg-danger"><i class="bi bi-exclamation-triangle-fill me-1"></i>Outside accepted range</span>
                       {% endif %}
+                    </div>
+                  {% endif %}
+                  {% set bounds = selected_ranges.get(dataset.key) %}
+                  {% if bounds %}
+                    <div class="text-body-secondary small mb-2">
+                      Accepted
+                      {% if bounds.min is not none and bounds.max is not none %}{{ '%g' % bounds.min }}–{{ '%g' % bounds.max }}
+                      {% elif bounds.min is not none %}min {{ '%g' % bounds.min }}
+                      {% else %}max {{ '%g' % bounds.max }}{% endif %}
                     </div>
                   {% endif %}
                   <div class="chart-card__canvas-wrap" style="cursor: pointer;" data-chart-key="{{ dataset.key }}" data-bs-toggle="modal" data-bs-target="#chartModal" onclick="showChartModal('{{ selected_sensor.id }}', '{{ dataset.key }}', '{{ dataset.label }}')">
